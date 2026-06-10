@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>GitHub Media Player — Fullscreen + Стоп в конце</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            user-select: none;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #000;
+            overflow: hidden;
+            height: 100vh;
+            width: 100vw;
+        }
+
+        .fullscreen-wrapper {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #000;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+        }
+
+        .controls-overlay {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: linear-gradient(to top, rgba(0,0,0,0.85), transparent);
+            padding: 30px 20px 20px;
+            opacity: 0;
+            transition: opacity 0.3s;
+            pointer-events: none;
+        }
+
+        .fullscreen-wrapper:hover .controls-overlay,
+        .fullscreen-wrapper.touch-controls .controls-overlay {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        #mediaElement {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            background: #000;
+        }
+
+        video, audio {
+            width: 100%;
+            height: 100%;
+        }
+
+        video {
+            object-fit: contain;
+        }
+
+        .control-bar {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            align-items: center;
+            flex-wrap: wrap;
+            margin-bottom: 15px;
+        }
+
+        .ctrl-btn {
+            background: rgba(0, 0, 0, 0.7);
+            border: 1px solid rgba(255,255,255,0.3);
+            padding: 12px 24px;
+            border-radius: 50px;
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+            transition: 0.2s;
+            font-size: 1rem;
+            backdrop-filter: blur(5px);
+        }
+
+        .ctrl-btn:hover {
+            background: #4caf50;
+            transform: scale(1.05);
+        }
+
+        .file-info {
+            color: white;
+            text-align: center;
+            font-size: 0.9rem;
+            text-shadow: 0 0 5px black;
+            margin-bottom: 10px;
+        }
+
+        .exit-fullscreen {
+            background: rgba(255, 68, 68, 0.8);
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            padding: 10px 18px;
+            border-radius: 40px;
+            font-size: 0.8rem;
+            border: none;
+            z-index: 100;
+            cursor: pointer;
+        }
+
+        .file-sidebar {
+            position: fixed;
+            left: -280px;
+            top: 0;
+            width: 260px;
+            height: 100%;
+            background: rgba(0,0,0,0.95);
+            backdrop-filter: blur(15px);
+            transition: left 0.3s;
+            z-index: 10000;
+            padding: 20px;
+            overflow-y: auto;
+            border-right: 1px solid #4caf50;
+        }
+
+        .file-sidebar.open {
+            left: 0;
+        }
+
+        .toggle-sidebar {
+            position: fixed;
+            left: 20px;
+            top: 20px;
+            background: rgba(0,0,0,0.6);
+            border: none;
+            color: white;
+            font-size: 28px;
+            cursor: pointer;
+            z-index: 10001;
+            width: 45px;
+            height: 45px;
+            border-radius: 50%;
+            backdrop-filter: blur(4px);
+        }
+
+        .file-sidebar h3 {
+            color: #4caf50;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .file-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .file-item {
+            background: rgba(255,255,255,0.1);
+            padding: 10px;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: 0.2s;
+            color: white;
+            font-size: 0.8rem;
+            word-break: break-word;
+            text-align: center;
+        }
+
+        .file-item:hover, .file-item.active {
+            background: #4caf50;
+            transform: scale(1.02);
+        }
+
+        .config-panel {
+            background: rgba(0,0,0,0.6);
+            padding: 15px;
+            border-radius: 20px;
+            margin-bottom: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .config-panel input {
+            padding: 10px;
+            border-radius: 12px;
+            border: none;
+            background: #222;
+            color: white;
+        }
+
+        .config-panel button {
+            background: #4caf50;
+            border: none;
+            padding: 10px;
+            border-radius: 12px;
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        .status-msg {
+            position: fixed;
+            bottom: 30px;
+            right: 20px;
+            background: rgba(0,0,0,0.7);
+            padding: 8px 16px;
+            border-radius: 30px;
+            color: #ffd966;
+            font-size: 0.7rem;
+            z-index: 10001;
+            pointer-events: none;
+        }
+
+        @media (max-width: 600px) {
+            .ctrl-btn { padding: 8px 16px; font-size: 0.8rem; }
+            .toggle-sidebar { font-size: 22px; width: 38px; height: 38px; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="fullscreen-wrapper" id="fullscreenWrapper">
+    <video id="mediaElement" controls style="display: none;"></video>
+    <audio id="audioElement" controls style="display: none;"></audio>
+    
+    <div class="controls-overlay">
+        <div class="file-info" id="fileInfo">🎬 Выберите файл из списка слева</div>
+        <div class="control-bar">
+            <button class="ctrl-btn" id="playBtn">▶ Воспр.</button>
+            <button class="ctrl-btn" id="pauseBtn">⏸ Пауза</button>
+            <button class="ctrl-btn" id="stopBtn">⏹ Стоп</button>
+            <button class="ctrl-btn" id="loopBtn">🔄 Зациклить</button>
+        </div>
+    </div>
+    
+    <button class="exit-fullscreen" id="exitFullscreenBtn">✖ Выйти из fullscreen</button>
+    <button class="toggle-sidebar" id="toggleSidebarBtn">📂</button>
+    
+    <div class="status-msg" id="statusMsg">⚡ Готов к работе</div>
+</div>
+
+<div class="file-sidebar" id="fileSidebar">
+    <h3>📁 Медиафайлы</h3>
+    <div class="config-panel">
+        <input type="text" id="repoInput" placeholder="пользователь/репозиторий" value="">
+        <input type="text" id="folderInput" placeholder="папка (media)" value="media">
+        <button id="loadFilesBtn">🔍 Загрузить</button>
+    </div>
+    <div id="fileListContainer">
+        <div class="file-item" style="background: #333;">Введите репозиторий</div>
+    </div>
+</div>
+
+<script>
+    let currentMedia = null;
+    let currentType = 'video';
+    let isLoop = false;
+    let currentFileList = [];
+    
+    const videoEl = document.getElementById('mediaElement');
+    const audioEl = document.getElementById('audioElement');
+    const fileInfoDiv = document.getElementById('fileInfo');
+    const playBtn = document.getElementById('playBtn');
+    const pauseBtn = document.getElementById('pauseBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const loopBtn = document.getElementById('loopBtn');
+    const exitFullscreenBtn = document.getElementById('exitFullscreenBtn');
+    const toggleSidebarBtn = document.getElementById('toggleSidebarBtn');
+    const fileSidebar = document.getElementById('fileSidebar');
+    const loadFilesBtn = document.getElementById('loadFilesBtn');
+    const repoInput = document.getElementById('repoInput');
+    const folderInput = document.getElementById('folderInput');
+    const fileListContainer = document.getElementById('fileListContainer');
+    const statusMsg = document.getElementById('statusMsg');
+    const wrapper = document.getElementById('fullscreenWrapper');
+    
+    function setStatus(msg, isError = false) {
+        statusMsg.innerHTML = isError ? `❌ ${msg}` : `✅ ${msg}`;
+        statusMsg.style.color = isError ? '#ff8888' : '#aaffaa';
+        setTimeout(() => {
+            if (statusMsg.innerHTML === `✅ ${msg}` || statusMsg.innerHTML === `❌ ${msg}`) {
+                // оставляем
+            }
+        }, 3000);
+    }
+    
+    function enterFullscreen() {
+        const elem = document.documentElement;
+        if (elem.requestFullscreen) {
+            elem.requestFullscreen().catch(err => {
+                console.warn("Fullscreen error:", err);
+                setStatus("⚠️ Для авто-fullscreen нажмите разрешить", true);
+            });
+        } else if (elem.webkitRequestFullscreen) {
+            elem.webkitRequestFullscreen();
+        } else if (elem.msRequestFullscreen) {
+            elem.msRequestFullscreen();
+        }
+    }
+    
+    exitFullscreenBtn.addEventListener('click', () => {
+        if (document.exitFullscreen) {
+            document.exitFullscreen();
+        }
+        setStatus("Fullscreen выключен");
+    });
+    
+    window.addEventListener('load', () => {
+        enterFullscreen();
+        document.body.style.overflow = 'hidden';
+    });
+    
+    function switchToMedia(type, url, fileName) {
+        videoEl.style.display = 'none';
+        audioEl.style.display = 'none';
+        videoEl.pause();
+        audioEl.pause();
+        
+        if (type === 'video') {
+            videoEl.src = url;
+            videoEl.load();
+            videoEl.style.display = 'block';
+            currentMedia = videoEl;
+            currentType = 'video';
+        } else {
+            audioEl.src = url;
+            audioEl.load();
+            audioEl.style.display = 'block';
+            currentMedia = audioEl;
+            currentType = 'audio';
+        }
+        
+        currentMedia.loop = isLoop;
+        fileInfoDiv.innerHTML = `🎬 ${fileName}`;
+        
+        enterFullscreen();
+        
+        const playPromise = currentMedia.play();
+        if (playPromise !== undefined) {
+            playPromise.then(() => {
+                setStatus(`Автовоспроизведение: ${fileName}`);
+            }).catch(err => {
+                setStatus(`Автоплей заблокирован, нажмите ▶ (${fileName})`, true);
+            });
+        }
+        
+        // Обработчики
+        currentMedia.onplay = () => setStatus(`▶ Играет: ${fileName}`);
+        currentMedia.onpause = () => setStatus(`⏸ Пауза: ${fileName}`);
+        
+        // ГЛАВНОЕ: видео в конце — ставим на паузу, а не перезапускаем
+        currentMedia.onended = () => {
+            if (isLoop) {
+                // Если включен повтор — перематываем и играем снова
+                currentMedia.currentTime = 0;
+                currentMedia.play().catch(e => console.log("loop error", e));
+                setStatus(`🔄 Повтор: ${fileName}`);
+            } else {
+                // Если повтор ВЫКЛЮЧЕН — просто ставим на паузу и остаёмся на последнем кадре (для видео)
+                currentMedia.pause();
+                if (currentType === 'video') {
+                    // Видео уже стоит на последнем кадре (не перематываем)
+                    setStatus(`⏸ Видео закончилось, на паузе (последний кадр): ${fileName}`);
+                } else {
+                    // Для аудио просто сбрасываем время в 0 (так логичнее)
+                    currentMedia.currentTime = 0;
+                    setStatus(`⏸ Аудио закончилось: ${fileName}`);
+                }
+            }
+        };
+        
+        currentMedia.onerror = () => setStatus(`Ошибка: ${fileName}`, true);
+    }
+    
+    async function getDefaultBranch(owner, repo) {
+        const res = await fetch(`https://api.github.com/repos/${owner}/${repo}`);
+        if (!res.ok) throw new Error('Репозиторий не найден');
+        const data = await res.json();
+        return data.default_branch;
+    }
+    
+    async function loadMediaFiles() {
+        let repo = repoInput.value.trim();
+        let folder = folderInput.value.trim().replace(/^\/+|\/+$/g, '');
+        if (!repo) {
+            setStatus('Введите репозиторий (пример: octocat/Hello-World)', true);
+            return;
+        }
+        const [owner, repoName] = repo.split('/');
+        if (!owner || !repoName) {
+            setStatus('Формат: пользователь/репозиторий', true);
+            return;
+        }
+        
+        setStatus(`Загрузка из ${repo}...`);
+        fileListContainer.innerHTML = '<div class="file-item">⏳ Загрузка...</div>';
+        
+        try {
+            const branch = await getDefaultBranch(owner, repoName);
+            const apiUrl = `https://api.github.com/repos/${owner}/${repoName}/contents/${folder || ''}?ref=${branch}`;
+            const response = await fetch(apiUrl);
+            if (!response.ok) throw new Error(`Папка "${folder}" не найдена`);
+            const files = await response.json();
+            
+            const mediaExt = ['.mp3', '.wav', '.ogg', '.m4a', '.mp4', '.webm', '.mov', '.mkv'];
+            const mediaFiles = files.filter(f => f.type === 'file' && mediaExt.some(ext => f.name.toLowerCase().endsWith(ext)));
+            
+            if (mediaFiles.length === 0) {
+                fileListContainer.innerHTML = '<div class="file-item">❌ Нет медиафайлов</div>';
+                setStatus('Медиафайлы не найдены', true);
+                return;
+            }
+            
+            currentFileList = mediaFiles.map(f => ({
+                name: f.name,
+                url: f.download_url,
+                isVideo: /\.(mp4|webm|mov|mkv)$/i.test(f.name)
+            }));
+            
+            fileListContainer.innerHTML = '';
+            currentFileList.forEach(file => {
+                const div = document.createElement('div');
+                div.className = 'file-item';
+                div.innerHTML = `${file.isVideo ? '🎬' : '🎵'} ${file.name}`;
+                div.onclick = () => {
+                    document.querySelectorAll('.file-item').forEach(el => el.classList.remove('active'));
+                    div.classList.add('active');
+                    const type = file.isVideo ? 'video' : 'audio';
+                    switchToMedia(type, file.url, file.name);
+                    fileSidebar.classList.remove('open');
+                };
+                fileListContainer.appendChild(div);
+            });
+            setStatus(`✅ Найдено ${mediaFiles.length} файлов. Нажмите на любой — fullscreen авто-плей`);
+        } catch (err) {
+            fileListContainer.innerHTML = `<div class="file-item">⚠️ Ошибка: ${err.message}</div>`;
+            setStatus(err.message, true);
+        }
+    }
+    
+    loadFilesBtn.addEventListener('click', loadMediaFiles);
+    
+    playBtn.addEventListener('click', () => currentMedia?.play());
+    pauseBtn.addEventListener('click', () => currentMedia?.pause());
+    stopBtn.addEventListener('click', () => {
+        if (currentMedia) {
+            currentMedia.pause();
+            currentMedia.currentTime = 0;
+            setStatus('Остановлено');
+        }
+    });
+    
+    loopBtn.addEventListener('click', () => {
+        isLoop = !isLoop;
+        if (currentMedia) currentMedia.loop = isLoop;
+        loopBtn.style.background = isLoop ? '#ff9800' : 'rgba(0,0,0,0.7)';
+        loopBtn.innerText = isLoop ? '🔁 Повтор ✓' : '🔄 Зациклить';
+        setStatus(isLoop ? 'Режим повтора включён' : 'Режим повтора выключен');
+    });
+    
+    toggleSidebarBtn.addEventListener('click', () => {
+        fileSidebar.classList.toggle('open');
+    });
+    
+    wrapper.addEventListener('click', (e) => {
+        if (e.target === wrapper || e.target.classList.contains('controls-overlay')) {
+            enterFullscreen();
+        }
+    });
+    
+    wrapper.addEventListener('touchstart', () => {
+        wrapper.classList.add('touch-controls');
+    });
+    
+    setStatus('Введите репозиторий и папку media, затем загрузите');
+</script>
+</body>
+  </html>
